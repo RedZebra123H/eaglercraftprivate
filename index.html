@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loading…</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0f1115; color: #e8e8ea;
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #loader { position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px; padding: 24px; box-sizing: border-box; }
+  #loader h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: .2px; }
+  #bar { width: min(420px, 80vw); height: 10px; border-radius: 999px;
+    background: #23262e; overflow: hidden; }
+  #fill { height: 100%; width: 0%; border-radius: inherit;
+    background: linear-gradient(90deg, #4f8cff, #7aa7ff); transition: width .15s ease; }
+  #fill.indeterminate { width: 35% !important; animation: slide 1.1s ease-in-out infinite; }
+  @keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+  #status { font-variant-numeric: tabular-nums; opacity: .8; font-size: 13px; min-height: 16px; }
+  #err { display: none; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+  button { background: #4f8cff; color: #fff; border: 0; border-radius: 8px;
+    padding: 9px 16px; font-size: 14px; cursor: pointer; }
+</style>
+</head>
+<body>
+  <div id="loader">
+    <h1 id="title">Loading…</h1>
+    <div id="bar"><div id="fill"></div></div>
+    <div id="status">Starting…</div>
+    <div id="err">
+      <div>Couldn't load. Check your connection.</div>
+      <button onclick="location.reload()">Retry</button>
+    </div>
+  </div>
+<script>
+(function () {
+  // ---------------- CONFIG ----------------
+  var GAME_URL = "game.html";     // the big file, sitting next to this one
+  // ----------------------------------------
+
+  var fill    = document.getElementById("fill");
+  var status  = document.getElementById("status");
+  var errBox  = document.getElementById("err");
+  var barWrap = document.getElementById("bar");
+
+  function fmt(b) {
+    if (b < 1024) return b + " B";
+    if (b < 1048576) return (b / 1024).toFixed(0) + " KB";
+    return (b / 1048576).toFixed(1) + " MB";
+  }
+  function fail() {
+    barWrap.style.display = "none";
+    status.style.display  = "none";
+    errBox.style.display  = "flex";
+  }
+
+  fetch(GAME_URL).then(function (res) {
+    if (!res.ok || !res.body) throw new Error("bad response");
+
+    var total  = parseInt(res.headers.get("Content-Length") || "0", 10);
+    var canPct = total > 0;
+    if (!canPct) fill.classList.add("indeterminate");
+
+    var reader = res.body.getReader();
+    var chunks = [];
+    var loaded = 0;
+
+    function pump() {
+      return reader.read().then(function (r) {
+        if (r.done) return;
+        chunks.push(r.value);
+        loaded += r.value.length;
+
+        // If the server gzips, Content-Length is the COMPRESSED size while we
+        // read DECOMPRESSED bytes, so loaded can pass total. Fall back cleanly.
+        if (canPct && loaded > total) { canPct = false; fill.classList.add("indeterminate"); }
+
+        if (canPct) {
+          var pct = Math.min(100, Math.round((loaded / total) * 100));
+          fill.style.width = pct + "%";
+          status.textContent = pct + "%  (" + fmt(loaded) + ")";
+        } else {
+          status.textContent = fmt(loaded) + " loaded…";
+        }
+        return pump();
+      });
+    }
+
+    return pump().then(function () {
+      var size = chunks.reduce(function (n, c) { return n + c.length; }, 0);
+      var all = new Uint8Array(size), off = 0;
+      chunks.forEach(function (c) { all.set(c, off); off += c.length; });
+      var html = new TextDecoder("utf-8").decode(all);
+
+      fill.classList.remove("indeterminate");
+      fill.style.width = "100%";
+      status.textContent = "Done";
+
+      // Replace this whole page with the game. The loader is gone for good.
+      document.open();
+      document.write(html);
+      document.close();
+    });
+  }).catch(fail);
+})();
+</script>
+</body>
+</html>
